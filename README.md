@@ -1,6 +1,102 @@
 Bonjour, 
-1- pourrais-tu me créer la classe c# nommée WebPayLoad avec l'ensemble des propriétés pouvant stocker les informations de la chaine de caractere suivante :
 
-version%3D3%2E7%2E1%5F1%26pm%5Ffpua%3Dmozilla%2F5%2E0%20%28iphone%3B%20cpu%20iphone%20os%2013%5F5%5F1%20like%20mac%20os%20x%29%20applewebkit%2F605%2E1%2E15%20%28khtml%2C%20like%20gecko%29%20version%2F13%2E1%2E1%20mobile%2F15e148%20safari%2F604%2E1%7C5%2E0%20%28iPhone%3B%20CPU%20iPhone%20OS%2013%5F5%5F1%20like%20Mac%20OS%20X%29%20AppleWebKit%2F605%2E1%2E15%20%28KHTML%2C%20like%20Gecko%29%20Version%2F13%2E1%2E1%20Mobile%2F15E148%20Safari%2F604%2E1%7CiPhone%26pm%5Ffpsc%3D32%7C414%7C736%7C736%26pm%5Ffpsw%3D%26pm%5Ffptz%3D1%26pm%5Ffpln%3Dlang%3Den%2Dgb%7Csyslang%3D%7Cuserlang%3D%26pm%5Ffpjv%3D0%26pm%5Ffpco%3D1%26pm%5Ffpasw%3D%26pm%5Ffpan%3DNetscape%26pm%5Ffpacn%3DMozilla%26pm%5Ffpol%3Dtrue%26pm%5Ffposp%3D%26pm%5Ffpup%3D%26pm%5Ffpsaw%3D414%26pm%5Ffpspd%3D32%26pm%5Ffpsbd%3D%26pm%5Ffpsdx%3D%26pm%5Ffpsdy%3D%26pm%5Ffpslx%3D%26pm%5Ffpsly%3D%26pm%5Ffpsfse%3D%26pm%5Ffpsui%3D%26pm%5Fos%3DiPhone%2FiPod%26pm%5Fbrmjv%3D13%26pm%5Fbr%3DSafari%26pm%5Finpt%3D%26pm%5Fexpt%3D
+1 - Pourrais-tu me créer une classe C# appelée MobileFingerPrint qui merge les propriété des Class1, Class2 et  Class3 :
 
-2- pourrais-tu m'ecrire une méthode nommée StringToWebPayLoad qui prend en parametre une chaine chaine de caractere qui a le meme format que celle du dessus et qui retourne un objet WebPayLoad avec chaque propriété valorisée par les valeurs extraites de la chaine
+ public class Class1
+ {
+     public string TimeZone { get; set; }
+     public string HardwareID { get; set; }
+     public Geolocationinfo[] GeoLocationInfo { get; set; }
+     public string DeviceModel { get; set; }
+     public bool MultitaskingSupported { get; set; }
+     public string DeviceName { get; set; }
+     public string DeviceSystemName { get; set; }
+     public string DeviceSystemVersion { get; set; }
+     public string Languages { get; set; }
+     public Wifinetworksdata WiFiNetworksData { get; set; }
+     public Batteryinfo BatteryInfo { get; set; }
+     public string ScreenSize { get; set; }
+     public string RSA_ApplicationKey { get; set; }
+     public string MCC { get; set; }
+     public string MNC { get; set; }
+     public string OS_ID { get; set; }
+     public string SDK_VERSION { get; set; }
+     public int Compromised { get; set; }
+     public int Emulator { get; set; }
+ }
+
+ public class Class2
+ {
+     public string DeviceSystemVersion { get; set; }
+     public string HardwareID { get; set; }
+     public string ScreenSize { get; set; }
+     public string Languages { get; set; }
+     public bool MultitaskingSupported { get; set; }
+     public string DeviceModel { get; set; }
+     public string RSA_ApplicationKey { get; set; }
+     public string TimeZone { get; set; }
+     public Batteryinfo BatteryInfo { get; set; }
+     public DateTime TIMESTAMP { get; set; }
+     public Geolocationinfo[] GeoLocationInfo { get; set; }
+     public int Emulator { get; set; }
+     public string OS_ID { get; set; }
+     public int Compromised { get; set; }
+     public string DeviceSystemName { get; set; }
+     public string DeviceName { get; set; }
+     public string SDK_VERSION { get; set; }
+ }
+
+ public class Class3
+ {
+     public DateTime TIMESTAMP { get; set; }
+     public string TimeZone { get; set; }
+     public string HardwareID { get; set; }
+     public string AdvertiserId { get; set; }
+     public Geolocationinfo[] GeoLocationInfo { get; set; }
+     public string DeviceModel { get; set; }
+     public bool MultitaskingSupported { get; set; }
+     public string DeviceName { get; set; }
+     public string DeviceSystemName { get; set; }
+     public string DeviceSystemVersion { get; set; }
+     public string Languages { get; set; }
+     public string WiFiMacAddress { get; set; }
+     public Wifinetworksdata WiFiNetworksData { get; set; }
+     public string CellTowerId { get; set; }
+     public string LocationAreaCode { get; set; }
+     public string ScreenSize { get; set; }
+     public string RSA_ApplicationKey { get; set; }
+     public string MCC { get; set; }
+     public string MNC { get; set; }
+     public string OS_ID { get; set; }
+     public string SDK_VERSION { get; set; }
+     public int Compromised { get; set; }
+     public int Emulator { get; set; }
+ }
+
+ public class Wifinetworksdata
+ {
+     public string BBSID { get; set; }
+     public string SignalStrength { get; set; }
+     public string SSID { get; set; }
+ }
+
+ public class Batteryinfo
+ {
+     public string Status { get; set; }
+     public int Plugged { get; set; }
+     public int Level { get; set; }
+     public int Voltage { get; set; }
+     public string Technology { get; set; }
+     public string Health { get; set; }
+ }
+
+ public class Geolocationinfo
+ {
+     public string Longitude { get; set; }
+     public string Latitude { get; set; }
+     public string HorizontalAccuracy { get; set; }
+     public string Timestamp { get; set; }
+     public string Status { get; set; }
+ }
+
+ 2- Pourrais-tu me m'crire la methode ExtractFingerPrint qui prend en parametre une variable de type string appelée fingerPrint et qui retourne un object de type Task<MobileFingerPrint> en utilisant la méthode de deserialization de l'assemble Sytem.Text.Json
