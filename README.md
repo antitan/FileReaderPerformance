@@ -1,122 +1,152 @@
- Merci pour ton aide, j'ai un petit soucis maintenant avec l'implementation , voici le code complet :
- 
- public async Task<IDictionary<string, bool>> DeleteDocuments(IEnumerable<Document> documents)
- {
-     var resultDictionary = new ConcurrentDictionary<string, bool>();
-     if (documents == null || !documents.Any())
-         return resultDictionary;
+Merci beaucoup pour ta reponse, j'ai détecté un nouveau probleme : une nouvelle exception est lancée lorsque la ligne var token = await tokenProvider.GetAccessTokenAsync() est appelée en parallele .
+Certainement un probleme de concurrence de thread. Voici l'implementation :
 
-     var semaphore = new SemaphoreSlim(Environment.ProcessorCount - 1);
-     var tasks = new List<Task>();
+using Core.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using RestSharp;
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Ubp.Dione.Common.Netcore.Caching.Abstractions;
 
-     foreach (var document in documents)
-     {
-         await semaphore.WaitAsync();
-         tasks.Add(Task.Run(async () =>
-         {
-             try
-             {
-                 var isSuccess = await DeleteDocumentAsync(document);
-                 resultDictionary.TryAdd(document.ChatGptDocumentId, isSuccess);
-             }
-             finally
-             {
-                 semaphore.Release();
-             }
-         }));
-     }
+namespace Infrastructure.Services.DocumentProcessor
+{
+    public interface ITokenProvider
+    {
+        Task<string> GetAccessTokenAsync();
+        Task ForceRefreshTokenAsync();
+    }
 
-     await Task.WhenAll(tasks);
-     return resultDictionary;
+    public class TokenProvider : ITokenProvider
+    { 
+        private readonly RestClient client; 
+        private const string TokenCacheKey = "AccessToken";
+        private const string CacheCategory = "JWT";
+        private readonly short apiCallTimeoutInSeconds = 3000;
+        private readonly ICacheRepository cacheRepository;
+        private readonly ApplicationConfiguration applicationConfiguration;
+        private readonly ILogger<IngestionService> logger;
 
- }
+        public TokenProvider(ILogger<IngestionService> logger, IOptions<ApplicationConfiguration> applicationConfiguration,ICacheRepository cacheRepository)
+        {
+            this.cacheRepository = cacheRepository;
+            this.applicationConfiguration = applicationConfiguration.Value;
+            this.logger = logger;
+            client = new RestClient(new RestClientOptions
+            {
+                BaseUrl = new Uri(this.applicationConfiguration.ZitadelDomain, UriKind.Absolute),
+                MaxTimeout = apiCallTimeoutInSeconds, 
+                Proxy = new WebProxy(this.applicationConfiguration.UbpProxyUrl, true)
+                {
+                    Credentials = new NetworkCredential(this.applicationConfiguration.ProxyUser, this.applicationConfiguration.ProxyPassword)
+                }
+            });
+        }
 
- private async Task<bool> DeleteDocumentAsync(Document document)
- {
-     bool isDeleted = false;
-     var client = new RestClient(new RestClientOptions
-     {
-         BaseUrl = new Uri(applicationConfiguration.IngestionUrlBase, UriKind.Absolute),
-         MaxTimeout = apiCallTimeoutInSeconds,
-         Proxy = new WebProxy(applicationConfiguration.UbpProxyUrl, true)
-         {
-             Credentials = new NetworkCredential(applicationConfiguration.ProxyUser, applicationConfiguration.ProxyPassword)
-         }
-     });
+        public async Task<string> GetAccessTokenAsync()
+        {
+            string? accessToken = null;
+            try
+            {  
+                if (cacheRepository.TryGetValue(TokenCacheKey, out accessToken))
+                {
+                    return accessToken!;
+                }
+                accessToken = await FetchNewTokenAsync();
+            }
+            catch(Exception ex)
+            {
+                string msg = $"Error while requesting  new access token ";
+                logger.LogError(ex, msg);
+                throw new Exception(msg);
+            }
+            return accessToken;
+        }
 
-     var request = new RestRequest(applicationConfiguration.IngestionUrlResource, Method.Post);
-     request.AddHeader("Content-Type", "application/json");
-     request.AddHeader("Accept", "application/json");
-
-     var token = await tokenProvider.GetAccessTokenAsync();
-     request.AddHeader("Authorization", $"Bearer {token}");
-
-     string embeddedTemplateFileInProject = IngestionEmbeddedResourceFiles.DeleteIngestedDocument;
-
-     var ingestTemplateContentFile = await embeddedResourcesManager.GetResourceFileContent(Assembly.GetExecutingAssembly(), embeddedTemplateFileInProject);
-
-     var formatedJson = ingestTemplateContentFile.Replace("[ChatGptDocumentId]", document.ChatGptDocumentId);
-
-     request.AddParameter("application/json", formatedJson, ParameterType.RequestBody);
-
-
-     //get retry policy
-     var unauthorizedRetryPolicy = retryPolicyProvider.GetPolicy();
+        public async Task ForceRefreshTokenAsync()
+        {
+            try
+            {
+                cacheRepository.Reset(new string[] { CacheCategory });
+                 await FetchNewTokenAsync();
+            }
+            catch (Exception ex)
+            {
+                string msg = $"Error to refresh with new access token ";
+                logger.LogError(ex, msg);
+                throw new Exception(msg);
+            }
+        }
 
 
-     var response = await unauthorizedRetryPolicy.ExecuteAsync(() => client.ExecuteAsync(request));
+        private async Task<string> FetchNewTokenAsync()
+        {
+            var tokenResponse = await RequestNewTokenAsync();
 
-     if (response.IsSuccessful)
-     {
+            cacheRepository.Set(TokenCacheKey,
+                                tokenResponse.accessToken, 
+                                //we ensure that it didn't expires before...
+                                TimeSpan.FromSeconds(tokenResponse.expiresIn!.Value! - 60),  
+                                CacheCategory);
 
-         var operationSuccessFull = JsonDocument.Parse(response.Content!)?
-                                        .RootElement
-                                     .GetProperty("data")
-                                     .GetRawText();
+            return tokenResponse.accessToken!;
+        }
 
-         if (operationSuccessFull == "null")
-         {
-             isDeleted = false;
-             logger.LogError($"Impossible to Delete Document, content response : [{response.Content}] ");
-         }
-         else
-         {
-             var result = JsonDocument.Parse(response.Content!)?
-                                            .RootElement
-                                         .GetProperty("data")
-                                         .GetProperty("contentDelete")
-                                         .GetBoolean();
-             isDeleted = result!.Value;
-         }   
-     }
-     else
-     {
-         logger.LogError($"Impossible to Delete Document, content response : [{response.Content}] , Status Code: {response.StatusCode}, Error Message: {response.ErrorMessage}");
-         throw new Exception($"Couldn't generate token from . Status Code: " + response.StatusCode + ", Error Message: " + response.ErrorMessage);
-     }
+        private async Task<(string? accessToken, int? expiresIn)> RequestNewTokenAsync()
+        {
+            string? accessToken = null;
+            int? expiresIn = null;
 
-     return isDeleted;
- }
- 
- le probleme est que si j'envoi une liste de documents :
- 
- [ 
- "ChatGptDocumentId1_ok",//ce document existe dans le cloud et sera supprimé
- "ChatGptDocumentId_ko",//ce document n'existe pas 
- ] 
- 
- la reponse que j'obtiens est un dictionnaire avec seulement une clé valeur avec l'id qui a reussi {key : "ChatGptDocumentId1_ok", value:true}. 
- Alors que le dictionnaire doit contenir 2 clé valeurs : {key : "ChatGptDocumentId1_ok", value:true} et {key : "ChatGptDocumentId2_ko", value:false} 
- 
-Si j'envoi une liste ChatGptDocumentId qui n'existe pas :
- 
- [ 
- "ChatGptDocumentId2_ko",//ce document n'existe pas 
- "ChatGptDocumentId3"_ko,//ce document n'existe pas 
- ] 
- 
- la reponse est correcte, le dictionnaire de retour doit contenir 2 clé valeurs : {key : "ChatGptDocumentId2_ko", value:false} et {key : "ChatGptDocumentI3_ko", value:false} 
- 
- Peux tu me corriger cela ?
- 
- 
+            var rsa = RSA.Create();
+            rsa.ImportRSAPrivateKey(Convert.FromBase64String(applicationConfiguration.PrivateKey), out _);
+            var securityKey = new RsaSecurityKey(rsa)
+            {
+                KeyId = applicationConfiguration.KeyId
+            };
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
+            var header = new JwtHeader(credentials);
+            var payload = new JwtPayload
+            {
+                { "iss", applicationConfiguration.UserId },
+                { "sub", applicationConfiguration.UserId },
+                { "aud", applicationConfiguration.ZitadelDomain },
+                { "iat", DateTimeOffset.Now.ToUnixTimeSeconds() },
+                { "exp", DateTimeOffset.Now.AddHours(1).ToUnixTimeSeconds() }
+            };
+            var jwtToken = new JwtSecurityToken(header, payload);
+            var handler = new JwtSecurityTokenHandler();
+            var encodedJwt = handler.WriteToken(jwtToken);
+            var request = new RestRequest(applicationConfiguration.ZitadelTokenUrl, Method.Post);
+            request.Timeout = 10000000;
+            request.AddParameter("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer", ParameterType.GetOrPost);
+            request.AddParameter("scope", $"openid profile email urn:zitadel:iam:user:resourceowner urn:zitadel:iam:org:projects:roles urn:zitadel:iam:org:project:id:{applicationConfiguration.ProjectId}:aud", ParameterType.GetOrPost);
+            request.AddParameter("assertion", encodedJwt, ParameterType.GetOrPost);
+            var response = await client.ExecuteAsync(request);
+            if (response.IsSuccessful)
+            {
+                accessToken = JsonDocument.Parse(response.Content!)?
+                                                   .RootElement
+                                                   .GetProperty("access_token")
+                                                   .GetString();
+
+                expiresIn = JsonDocument.Parse(response.Content!)?
+                                                   .RootElement
+                                                   .GetProperty("expires_in")
+                                                   .GetInt32();
+            }
+            else
+            {
+                throw new Exception($"Error while requesting token: {response.StatusCode} - {response.Content}");
+            }
+
+            return (accessToken, expiresIn);
+        }
+    }
+
+}
+
+
+  Peux tu me donner une version qui supporte la concurrence des thread ?
