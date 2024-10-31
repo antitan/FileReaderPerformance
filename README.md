@@ -1,152 +1,81 @@
-Merci beaucoup pour ta reponse, j'ai détecté un nouveau probleme : une nouvelle exception est lancée lorsque la ligne var token = await tokenProvider.GetAccessTokenAsync() est appelée en parallele .
-Certainement un probleme de concurrence de thread. Voici l'implementation :
-
-using Core.Configuration;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
-using RestSharp;
-using System.IdentityModel.Tokens.Jwt;
-using System.Net;
-using System.Security.Cryptography;
-using System.Text.Json;
-using Ubp.Dione.Common.Netcore.Caching.Abstractions;
-
-namespace Infrastructure.Services.DocumentProcessor
-{
-    public interface ITokenProvider
-    {
-        Task<string> GetAccessTokenAsync();
-        Task ForceRefreshTokenAsync();
-    }
-
-    public class TokenProvider : ITokenProvider
-    { 
-        private readonly RestClient client; 
-        private const string TokenCacheKey = "AccessToken";
-        private const string CacheCategory = "JWT";
-        private readonly short apiCallTimeoutInSeconds = 3000;
-        private readonly ICacheRepository cacheRepository;
-        private readonly ApplicationConfiguration applicationConfiguration;
-        private readonly ILogger<IngestionService> logger;
-
-        public TokenProvider(ILogger<IngestionService> logger, IOptions<ApplicationConfiguration> applicationConfiguration,ICacheRepository cacheRepository)
-        {
-            this.cacheRepository = cacheRepository;
-            this.applicationConfiguration = applicationConfiguration.Value;
-            this.logger = logger;
-            client = new RestClient(new RestClientOptions
-            {
-                BaseUrl = new Uri(this.applicationConfiguration.ZitadelDomain, UriKind.Absolute),
-                MaxTimeout = apiCallTimeoutInSeconds, 
-                Proxy = new WebProxy(this.applicationConfiguration.UbpProxyUrl, true)
-                {
-                    Credentials = new NetworkCredential(this.applicationConfiguration.ProxyUser, this.applicationConfiguration.ProxyPassword)
-                }
-            });
-        }
-
-        public async Task<string> GetAccessTokenAsync()
-        {
-            string? accessToken = null;
-            try
-            {  
-                if (cacheRepository.TryGetValue(TokenCacheKey, out accessToken))
-                {
-                    return accessToken!;
-                }
-                accessToken = await FetchNewTokenAsync();
-            }
-            catch(Exception ex)
-            {
-                string msg = $"Error while requesting  new access token ";
-                logger.LogError(ex, msg);
-                throw new Exception(msg);
-            }
-            return accessToken;
-        }
-
-        public async Task ForceRefreshTokenAsync()
-        {
-            try
-            {
-                cacheRepository.Reset(new string[] { CacheCategory });
-                 await FetchNewTokenAsync();
-            }
-            catch (Exception ex)
-            {
-                string msg = $"Error to refresh with new access token ";
-                logger.LogError(ex, msg);
-                throw new Exception(msg);
-            }
-        }
-
-
-        private async Task<string> FetchNewTokenAsync()
-        {
-            var tokenResponse = await RequestNewTokenAsync();
-
-            cacheRepository.Set(TokenCacheKey,
-                                tokenResponse.accessToken, 
-                                //we ensure that it didn't expires before...
-                                TimeSpan.FromSeconds(tokenResponse.expiresIn!.Value! - 60),  
-                                CacheCategory);
-
-            return tokenResponse.accessToken!;
-        }
-
-        private async Task<(string? accessToken, int? expiresIn)> RequestNewTokenAsync()
-        {
-            string? accessToken = null;
-            int? expiresIn = null;
-
-            var rsa = RSA.Create();
-            rsa.ImportRSAPrivateKey(Convert.FromBase64String(applicationConfiguration.PrivateKey), out _);
-            var securityKey = new RsaSecurityKey(rsa)
-            {
-                KeyId = applicationConfiguration.KeyId
-            };
-            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
-            var header = new JwtHeader(credentials);
-            var payload = new JwtPayload
-            {
-                { "iss", applicationConfiguration.UserId },
-                { "sub", applicationConfiguration.UserId },
-                { "aud", applicationConfiguration.ZitadelDomain },
-                { "iat", DateTimeOffset.Now.ToUnixTimeSeconds() },
-                { "exp", DateTimeOffset.Now.AddHours(1).ToUnixTimeSeconds() }
-            };
-            var jwtToken = new JwtSecurityToken(header, payload);
-            var handler = new JwtSecurityTokenHandler();
-            var encodedJwt = handler.WriteToken(jwtToken);
-            var request = new RestRequest(applicationConfiguration.ZitadelTokenUrl, Method.Post);
-            request.Timeout = 10000000;
-            request.AddParameter("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer", ParameterType.GetOrPost);
-            request.AddParameter("scope", $"openid profile email urn:zitadel:iam:user:resourceowner urn:zitadel:iam:org:projects:roles urn:zitadel:iam:org:project:id:{applicationConfiguration.ProjectId}:aud", ParameterType.GetOrPost);
-            request.AddParameter("assertion", encodedJwt, ParameterType.GetOrPost);
-            var response = await client.ExecuteAsync(request);
-            if (response.IsSuccessful)
-            {
-                accessToken = JsonDocument.Parse(response.Content!)?
-                                                   .RootElement
-                                                   .GetProperty("access_token")
-                                                   .GetString();
-
-                expiresIn = JsonDocument.Parse(response.Content!)?
-                                                   .RootElement
-                                                   .GetProperty("expires_in")
-                                                   .GetInt32();
-            }
-            else
-            {
-                throw new Exception($"Error while requesting token: {response.StatusCode} - {response.Content}");
-            }
-
-            return (accessToken, expiresIn);
-        }
-    }
-
-}
-
-
-  Peux tu me donner une version qui supporte la concurrence des thread ?
+ALTER TABLE [dbo].[Activity] ADD  CONSTRAINT [DF_Activity_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[ActivityWorkflow] ADD  CONSTRAINT [DF_ActivityWorkflow_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[ChallengeRequestHistory] ADD  CONSTRAINT [DF_ChallengeRequestHistory_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[ChallengeRequestHistory] ADD  CONSTRAINT [DF__Challenge__Creat__09A971A2]  DEFAULT (getdate()) FOR [CreatedOn]
+GO
+ALTER TABLE [dbo].[FingerPrint] ADD  CONSTRAINT [DF_FingerPrint_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[GeoLocationInfo] ADD  CONSTRAINT [DF_GeoLocationInfo_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[PaymentActivity] ADD  CONSTRAINT [DF_PaymentActivity_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[RestrictionList] ADD  CONSTRAINT [DF_RestrictionList_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[RestrictionValue] ADD  CONSTRAINT [DF_RestrictionValue_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[Rule] ADD  CONSTRAINT [DF_Rule_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[Workflow] ADD  CONSTRAINT [DF_Workflow_Id]  DEFAULT (newid()) FOR [Id]
+GO
+ALTER TABLE [dbo].[Activity]  WITH CHECK ADD  CONSTRAINT [FK_Activity_ActivityType] FOREIGN KEY([ActivityTypeId])
+REFERENCES [dbo].[ActivityType] ([Id])
+GO
+ALTER TABLE [dbo].[Activity] CHECK CONSTRAINT [FK_Activity_ActivityType]
+GO
+ALTER TABLE [dbo].[Activity]  WITH CHECK ADD  CONSTRAINT [FK_Activity_FingerPrint] FOREIGN KEY([FingerPrintId])
+REFERENCES [dbo].[FingerPrint] ([Id])
+GO
+ALTER TABLE [dbo].[Activity] CHECK CONSTRAINT [FK_Activity_FingerPrint]
+GO
+ALTER TABLE [dbo].[ActivityWorkflow]  WITH CHECK ADD  CONSTRAINT [FK_ActivityWorkflow_Rule] FOREIGN KEY([RuleId])
+REFERENCES [dbo].[Rule] ([Id])
+GO
+ALTER TABLE [dbo].[ActivityWorkflow] CHECK CONSTRAINT [FK_ActivityWorkflow_Rule]
+GO
+ALTER TABLE [dbo].[ActivityWorkflow]  WITH CHECK ADD  CONSTRAINT [FK_ActivityWorkflow_Workflow] FOREIGN KEY([WorkFlowId])
+REFERENCES [dbo].[Workflow] ([Id])
+GO
+ALTER TABLE [dbo].[ActivityWorkflow] CHECK CONSTRAINT [FK_ActivityWorkflow_Workflow]
+GO
+ALTER TABLE [dbo].[ChallengeRequestHistory]  WITH CHECK ADD  CONSTRAINT [FK_ChallengeRequestHistory_Activity_ActivityType] FOREIGN KEY([ActivityId], [ActivityTypeId])
+REFERENCES [dbo].[Activity] ([Id], [ActivityTypeId])
+GO
+ALTER TABLE [dbo].[ChallengeRequestHistory] CHECK CONSTRAINT [FK_ChallengeRequestHistory_Activity_ActivityType]
+GO
+ALTER TABLE [dbo].[GeoLocationInfo]  WITH CHECK ADD  CONSTRAINT [FK_GeoLocationInfo_FingerPrint] FOREIGN KEY([FingerPrintId])
+REFERENCES [dbo].[FingerPrint] ([Id])
+GO
+ALTER TABLE [dbo].[GeoLocationInfo] CHECK CONSTRAINT [FK_GeoLocationInfo_FingerPrint]
+GO
+ALTER TABLE [dbo].[PaymentActivity]  WITH CHECK ADD  CONSTRAINT [FK_PaymentActivity_Activity_ActivityType] FOREIGN KEY([ActivityId], [ActivityTypeId])
+REFERENCES [dbo].[Activity] ([Id], [ActivityTypeId])
+GO
+ALTER TABLE [dbo].[PaymentActivity] CHECK CONSTRAINT [FK_PaymentActivity_Activity_ActivityType]
+GO
+ALTER TABLE [dbo].[RestrictionValue]  WITH CHECK ADD  CONSTRAINT [FK_RestrictionValue_RestrictionList] FOREIGN KEY([RestrictionListId])
+REFERENCES [dbo].[RestrictionList] ([Id])
+GO
+ALTER TABLE [dbo].[RestrictionValue] CHECK CONSTRAINT [FK_RestrictionValue_RestrictionList]
+GO
+ALTER TABLE [dbo].[Rule]  WITH CHECK ADD  CONSTRAINT [FK_Rule_ActionType] FOREIGN KEY([ExpectedActionTypeId])
+REFERENCES [dbo].[ActionType] ([Id])
+GO
+ALTER TABLE [dbo].[Rule] CHECK CONSTRAINT [FK_Rule_ActionType]
+GO
+ALTER TABLE [dbo].[Rule]  WITH CHECK ADD  CONSTRAINT [FK_Rule_Workflow] FOREIGN KEY([WorkFlowId])
+REFERENCES [dbo].[Workflow] ([Id])
+GO
+ALTER TABLE [dbo].[Rule] CHECK CONSTRAINT [FK_Rule_Workflow]
+GO
+ALTER TABLE [dbo].[Workflow]  WITH CHECK ADD  CONSTRAINT [FK_Workflow_ActivityType] FOREIGN KEY([ActivityTypeId])
+REFERENCES [dbo].[ActivityType] ([Id])
+GO
+ALTER TABLE [dbo].[Workflow] CHECK CONSTRAINT [FK_Workflow_ActivityType]
+GO
+ALTER TABLE [dbo].[PaymentActivity]  WITH CHECK ADD  CONSTRAINT [CheckPaymentActivityValue] CHECK  (([ActivityTypeId]=(1)))
+GO
+ALTER TABLE [dbo].[PaymentActivity] CHECK CONSTRAINT [CheckPaymentActivityValue]
+GO
