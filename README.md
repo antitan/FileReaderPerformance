@@ -1,34 +1,89 @@
-GO
-SET IDENTITY_INSERT [dbo].[ActivityType] ON 
+  bonjour, la requete suivante avec dapper a un probleme, la ligne documentEntry.DocumentType = documentType; foncnne mal, elle ne rempli pas correctement la propriété documentEntry.DocumentType.Id avec la bonne valeur. (elle met 0 systematiquement) :
+  
+  
+  using (var connection = new SqlConnection(connectionString))
+  {
+      await connection.OpenAsync(cancellationToken);
+      //Un dictionnaire est utilisé pour suivre et regrouper les documents par leur identifiant unique.
+      //Cela garantit que chaque document n'est créé qu'une seule fois et que toutes les métadonnées associées sont ajoutées à la liste de métadonnées de ce document.
+      var documentDictionary = new Dictionary<Guid, Document>();
+       
+      var entities = await connection.QueryAsync<Document, DocumentType, DocumentMetadata, Document>(
+          @$"SELECT [Document].[Id],
+           [Document].[Name],
+           [Document].[ChatGptScopeId],
+           [Document].[ChatGptDocumentId],
+           [Document].[DocumentTypeId],
+           [Document].[IngestionState],
+           [Document].[IngestionStateUpdatedAt],
+           [Document].[ProcessingErrorDetail], 
+           [DocumentType].[Id] AS DocumentTypeId,
+           [DocumentType].[Extension],
+           [DocumentType].[MimeType], 
+           [DocumentMetadata].[Id] AS MetadataId,
+           [DocumentMetadata].[MetadataKey],
+           [DocumentMetadata].[MetadataValue]
+            FROM [Document]
+            INNER JOIN [DocumentType] ON [DocumentType].[Id] = [Document].[DocumentTypeId] 
+            LEFT JOIN [DocumentMetadata] ON [DocumentMetadata].[DocumentId] = [Document].[Id]
+            WHERE {whereClause}",
+          (document, documentType, metadata) =>
+          {
+              Document? documentEntry;
 
-INSERT [dbo].[ActivityType] ([Id], [Label]) VALUES (1, N'Payment')
-SET IDENTITY_INSERT [dbo].[ActivityType] OFF
-GO
-INSERT [dbo].[Workflow] ([Id], [ActivityTypeId], [ExecutionOrder], [Name], [ActiveFrom], [ActiveTo], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdateOn]) VALUES (N'47560305-49f1-45e6-baad-9b5746a8520e', 1, 1, N'PaymentWorkFlow_1', CAST(N'2024-09-10' AS Date), NULL, N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-GO
-INSERT [dbo].[RestrictionList] ([Id], [Name]) VALUES (N'4d2727f6-4b83-46d2-8240-5b7d77fbc6b8', N'ForbiddenIbans')
-INSERT [dbo].[RestrictionList] ([Id], [Name]) VALUES (N'8b28ed1e-c2f8-4555-ab3a-6b7518acfef0', N'ForbiddenIps')
-INSERT [dbo].[RestrictionList] ([Id], [Name]) VALUES (N'd24f6bfe-a9cf-4ac0-b7c1-a129363e6d51', N'ForbiddenCountries')
-GO
-SET IDENTITY_INSERT [dbo].[ActionType] ON 
+              if (!documentDictionary.TryGetValue(document.Id, out documentEntry))
+              {
+                  documentEntry = document;
+                  documentEntry.DocumentType = documentType;
+                  documentEntry.DocumentMetadatas = new List<DocumentMetadata>();
+                  documentDictionary.Add(documentEntry.Id, documentEntry);
+              }
 
-INSERT [dbo].[ActionType] ([Id], [Label]) VALUES (1, N'Allow')
-INSERT [dbo].[ActionType] ([Id], [Label]) VALUES (2, N'Challenge')
-SET IDENTITY_INSERT [dbo].[ActionType] OFF
-GO
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'f823df24-a5fd-44cc-9bb6-0252aa5b9b2e', N'47560305-49f1-45e6-baad-9b5746a8520e', 2, N'rule Clients > PSD2 > Chpt 3 Art 10 > More than 180 days since last SCA', N'Payment service providers shall not be exempted from the application of strong customer authentication where either of the following condition is met:  more than 180 days have elapsed since the last time the payment service user accessed online the information specified in paragraph 1(b) and strong customer authentication was applied.', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" ) AND PaymentRequestActivity.PaymentType != 1 AND UserDataActivitiesHistory.UserPaymentActivities.Any(c => c.ChallengeResult == true) AND AggregateRootUserHistoryHelper.NbDaysSinceLastValidatedSCA(UserDataActivitiesHistory.UserPaymentActivities) > 180 ', 2, N'Clients > PSD2 > Chpt 3 Art 10 > More than 180 days since last SCA', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'665b1a3b-8714-4995-b10e-06deeedb602f', N'47560305-49f1-45e6-baad-9b5746a8520e', 4, N'rule Clients > PSD2 > Chpt 3 Art 14 > Recurring Transactions', N'Payment service providers shall apply strong customer authentication when a payer creates, amends, or initiates for the first time, a series of recurring transactions with the same amount and with the same payee', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" ) AND PaymentRequestActivity.PaymentType == 5 ', 2, N'Clients > PSD2 > Chpt 3 Art 14 > Recurring Transactions', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'64bd9386-ca5d-41ff-b868-1b6410a823cf', N'47560305-49f1-45e6-baad-9b5746a8520e', 6, N'rule Clients > PSD2 XSDA only > Chpt 3 Art 16 > Low value transactions 2', N'Amount > 30 EUR OR sum Amount since last SCA > 100 EUR', N'PaymentRequestActivity.Origin == "XS2A" AND PaymentRequestActivity.PaymentType != 1 AND ( PaymentRequestActivity.Amount > 30 AND PaymentRequestActivity.Currency == "EUR" ) AND UserDataActivitiesHistory.UserPaymentActivities.Any(c => c.ChallengeResult == true) AND AggregateRootUserHistoryHelper.SumPaymentsSinceLastValidatedSCA(UserDataActivitiesHistory.UserPaymentActivities) > 100', 2, N'Clients > PSD2 XSDA only > Chpt 3 Art 16 > Low value transactions 2', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'1c513feb-13ea-43ea-a7b1-67b3211ee837', N'47560305-49f1-45e6-baad-9b5746a8520e', 8, N'rule Machine Learning', N'Payment from Unknown IP', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" ) AND !UserDataActivitiesHistory.UserPaymentActivities.Any(a=>a.Ip == PaymentRequestActivity.Ip)   ', 2, N'Machine Learning', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'5362a848-c9af-4406-aade-9ee7e9189f67', N'47560305-49f1-45e6-baad-9b5746a8520e', 9, N'rule Connecting from Forbidden IP', N'Connecting from Forbidden IP', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" )  AND  ForbiddenIpList.Contains( PaymentRequestActivity.Ip)', 2, N'Connecting from Forbidden IP', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'c0b2dbc4-6680-4dd6-ada6-b0bed3b65b6d', N'47560305-49f1-45e6-baad-9b5746a8520e', 10, N'rule Sending payment for a forbidden IBAN', N'Sending payment for a forbidden IBAN', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" )  AND  ForbiddenAccountList.Contains(PaymentRequestActivity.AccountNumber)', 2, N'Sending payment for a forbidden IBAN', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'c60a81a6-b8fd-4e28-ba26-c268287362b1', N'47560305-49f1-45e6-baad-9b5746a8520e', 11, N'rule Sending payment for a forbidden Country', N'Sending payment for a forbidden Country', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" )  AND ForbiddenCountryList.Contains( PaymentRequestActivity.CountryDestination )', 2, N'Sending payment for a forbidden Country', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'4f6625f5-4110-456a-9317-d3e37d8dd7f3', N'47560305-49f1-45e6-baad-9b5746a8520e', 3, N'rule Clients > PSD2 > Chpt 3 Art 13 > Not Trusted Beneficiary
-', N'Payment service providers shall apply strong customer authentication where a payer creates or amends a list of trusted beneficiaries through the payer''s account servicing payment service provider.
-', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" ) AND PaymentRequestActivity.PaymentType != 1 AND  !UserDataActivitiesHistory.UserPaymentActivities.Any(a=>a.AccountNumber == PaymentRequestActivity.AccountNumber)', 2, N'Clients > PSD2 > Chpt 3 Art 13 > Not Trusted Beneficiary
-', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'39b968eb-3a15-4a0f-aafd-d69478248118', N'47560305-49f1-45e6-baad-9b5746a8520e', 7, N'rule internal payment', N'Internal Payment', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" ) AND PaymentRequestActivity.PaymentType == 1', 1, N'Internal Payment', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'1a59028e-e027-4b97-834b-f63ba9cd1f27', N'47560305-49f1-45e6-baad-9b5746a8520e', 5, N'rule Clients > PSD2 XS2A only > Chpt 3 Art 16 > Low value transactions', N'Payment amount >30 EUR AND nbPaymentsinceLastSCA > 5', N'PaymentRequestActivity.Origin == "XS2A" AND PaymentRequestActivity.PaymentType != 1 AND ( PaymentRequestActivity.Amount > 30 AND PaymentRequestActivity.Currency == "EUR" ) AND UserDataActivitiesHistory.UserPaymentActivities.Any(c => c.ChallengeResult == true) AND AggregateRootUserHistoryHelper.NbPaymentsSinceLastValidatedSCA(UserDataActivitiesHistory.UserPaymentActivities) > 5', 2, N'Clients > PSD2 XS2A only > Chpt 3 Art 16 > Low value transactions', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-INSERT [dbo].[Rule] ([Id], [WorkFlowId], [ExecutionOrder], [Name], [Description], [Expression], [ExpectedActionTypeId], [ErrorMessage], [CreatedBy], [CreatedOn], [UpdatedBy], [UpdatedOn]) VALUES (N'd3770e8b-681c-41ba-b544-fe512b0df69c', N'47560305-49f1-45e6-baad-9b5746a8520e', 1, N'rule Clients >rule PSD2 > Chpt 3 Art 10 > First Payment Attempt', N'Payment service providers shall not be exempted from the application of strong customer authentication where either of the following condition is met: (a) the payment service user is accessing online the information specified in paragraph 1 for the first time
-', N'(PaymentRequestActivity.Origin == "EBANKING" OR PaymentRequestActivity.Origin == "XS2A" ) AND PaymentRequestActivity.PaymentType != 1 AND !UserDataActivitiesHistory.UserPaymentActivities.Any(c => c.ChallengeResult == true) ', 2, N'Clients > PSD2 > Chpt 3 Art 10 > First Payment Attempt', N'dzc', CAST(N'2024-10-10T00:00:00.000' AS DateTime), NULL, NULL)
-GO
+              if (metadata != null)
+              {
+                  ((List<DocumentMetadata>)documentEntry.DocumentMetadatas).Add(metadata);
+              }
+
+              return documentEntry;
+          },
+
+      //La propriété `splitOn` de la méthode `QueryAsync` vous permet de spécifier les colonnes qui délimitent les différents objets dans votre requête.
+      //Cela permet à Dapper de savoir comment diviser la ligne de résultats en plusieurs objets.
+      splitOn: "DocumentTypeId,MetadataId"
+      );
+}
+
+et voici les classes referencées :
+
+ public class Document  
+ {
+         public Guid Id { get; set; }
+         public byte DocumentTypeId { get; set; }
+         public string IngestionState { get; set; }
+         public DateTime?  IngestionStateUpdatedAt { get; set; }
+         public string Name { get; set; }
+         public string ChatGptScopeId { get; set; }
+         public string ChatGptDocumentId { get; set; } 
+        
+
+         public DocumentType DocumentType { get; set; }
+         public  IEnumerable<DocumentMetadata> DocumentMetadatas { get; set; } 
+         public string? ProcessingErrorDetail { get; set; }   
+ }
+ 
+  public class DocumentType : IEntityWithId<byte>
+ {
+     public byte Id {  get; set; }   
+     public string Extension { get; set; }
+     public string MimeType { get; set; }
+ }
+ 
+   public class DocumentMetadata : IEntityWithId<long>
+  {
+      public long Id { get; set; }
+      public Guid DocumentId { get; set; }
+      public string  MetadataKey { get; set; }
+      public string MetadataValue { get; set; }
+  }
+  
+  Peux-tu m'indiquer qu'es ce que je dois changer pour que cela fonctionne et que la documentEntry.DocumentType.Id soit correctement valorisée
