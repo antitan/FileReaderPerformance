@@ -1,11 +1,119 @@
-Voici le fonctionnement détaillée :
-Lorsqu’une nouvelle requête web est envoyée au travers de la méthode Payment :
-1)	On insert cette nouvelle requete en base. (table Activity + PaymentActivity) . Activity=null et ChallengeResult=null
-2)	les règles sont remontées de la base de données de la table Rule ordonnées par ExecuteOrder croissant et le moteur de worflow exécute toutes les règles dans l’ordre. 
-3)	On itère sur les résultats d’exécution de chaque règle :
--	Si le résultat de l’exécution de la règle courante est IsSuccess=true :
--Si le résultat attendu de la règle est de type challenge  -> alors il y a challenge on insert un enregistrement dans ActivityWorkflow avec la valeur 0 puisque la règle n’est pas passée.
--Sinon si le resultat est de type Allow  on insert un enregistrement dans ActivityWorkflow avec la valeur 1 puisque la règle est pas passée.
-              -     Sinon Si le résultat de l’exécution de la règle courante est IsSuccess=false :
-	    - Si le résultat attendu de la règle est de type challenge  -> alors il y a challenge on insert un enregistrement dans ActivityWorkflow avec la valeur 0 puisque la règle n’est pas passée.
-	    - Sinon si le résultat est de type Allow on insert on insert un enregistrement dans ActivityWorkflow avec la valeur 0 puisque la règle est passée.
+  logger.LogTrace($" analyse paymentRequest {JsonSerializer.Serialize(paymentRequestActivity, new JsonSerializerOptions { WriteIndented = true })}");
+
+  PaymentWorflowRulesResult paymentWorflowRulesResult = new PaymentWorflowRulesResult();
+
+  var ruleParameters = new[]
+  {
+      new RuleParameter("ForbiddenIpList", aggregateRootRestrictionItems.ForbiddenIpList),
+      new RuleParameter("ForbiddenAccountList", aggregateRootRestrictionItems.ForbiddenAccountList),
+      new RuleParameter("ForbiddenCountryList", aggregateRootRestrictionItems.ForbiddenCountryList),
+      new RuleParameter("UserDataActivitiesHistory", aggregateRootUserHistory),
+      new RuleParameter("PaymentRequestActivity", paymentRequestActivity)
+  };
+
+  //execute worflow rules
+  var results = await rulesEngine.ExecuteAllRulesAsync(workflow.Name, ruleParameters);
+
+  //persisit the paymentRequestActivity with activity and fingerPrint
+  await domainPaymentActivityRepository.SaveAsync(paymentRequestActivity, cancellationToken);
+  paymentWorflowRulesResult.ActivityId = paymentRequestActivity.ActivityId;
+
+  bool isChallenged = false;
+  foreach (var ruleResult in results)
+  {
+      var expectedActionTypeId = (ActionTypeEnum)ruleResult.Rule.Properties[EngineRuleProperties.ExpectedActionTypeId];
+
+      logger.LogTrace($" process rule result : {JsonSerializer.Serialize(ruleResult.Rule, new JsonSerializerOptions { WriteIndented = true })}");
+      if (ruleResult.IsSuccess)
+      {
+          if (expectedActionTypeId == ActionTypeEnum.Challenge)
+          {
+              isChallenged = true;
+              //save the firt rule whose failed
+              if (paymentWorflowRulesResult.FirstChallengedRule == null)
+              {
+                  paymentWorflowRulesResult.FirstChallengedRule = new RulesEngine.Models.Rule
+                  {
+                      RuleName = ruleResult.Rule.RuleName,
+                      Expression= ruleResult.Rule.Expression
+                  };
+              }
+              paymentWorflowRulesResult.NeedChallenge = true;
+
+              ActivityWorkflow actWorkflow = new ActivityWorkflow
+              {
+                  WorkFlowId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.WorkFlowId],
+                  ActivityId = paymentRequestActivity.ActivityId,
+                  ActivityType = ActivityTypeEnum.Payment,
+                  RuleId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.Id],
+                  ExecutionResult = false,
+              };
+              await domainActivityRepository.AddActivityWorflowAsync(actWorkflow, cancellationToken);
+          }
+          else if (expectedActionTypeId == ActionTypeEnum.Allow)
+          {
+              ActivityWorkflow actWorkflow = new ActivityWorkflow
+              {
+                  WorkFlowId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.WorkFlowId],
+                  ActivityId = paymentRequestActivity.ActivityId,
+                  ActivityType = ActivityTypeEnum.Payment,
+                  RuleId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.Id],
+                  ExecutionResult = true,
+              };
+              await domainActivityRepository.AddActivityWorflowAsync(actWorkflow, cancellationToken);
+          }
+      }
+      //IsSuccess == false
+      else
+      {
+          if (expectedActionTypeId == ActionTypeEnum.Challenge)
+          {
+              ActivityWorkflow actWorkflow = new ActivityWorkflow
+              {
+                  WorkFlowId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.WorkFlowId],
+                  ActivityId = paymentRequestActivity.ActivityId,
+                  ActivityType = ActivityTypeEnum.Payment,
+                  RuleId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.Id],
+                  ExecutionResult = true,
+              };
+              await domainActivityRepository.AddActivityWorflowAsync(actWorkflow, cancellationToken);
+          }
+          else if (expectedActionTypeId == ActionTypeEnum.Allow)
+          {
+              isChallenged = true;
+              //save the firt rule whose failed
+              if (paymentWorflowRulesResult.FirstChallengedRule == null)
+              {
+                  paymentWorflowRulesResult.FirstChallengedRule = new RulesEngine.Models.Rule
+                  {
+                      RuleName = ruleResult.Rule.RuleName,
+                      Expression = ruleResult.Rule.Expression
+                  };
+              }
+              paymentWorflowRulesResult.NeedChallenge = true;
+
+              ActivityWorkflow actWorkflow = new ActivityWorkflow
+              {
+                  WorkFlowId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.WorkFlowId],
+                  ActivityId = paymentRequestActivity.ActivityId,
+                  ActivityType = ActivityTypeEnum.Payment,
+                  RuleId = (Guid)ruleResult.Rule.Properties[EngineRuleProperties.Id],
+                  ExecutionResult = false,
+              };
+              await domainActivityRepository.AddActivityWorflowAsync(actWorkflow, cancellationToken);
+          }
+      }
+  }
+
+  logger.LogTrace($"Summary of the workflow {workflow.Name} execution with the paymentRequest {JsonSerializer.Serialize(paymentRequestActivity, new JsonSerializerOptions { WriteIndented = true })}");
+
+  if (isChallenged) 
+   logger.LogTrace($" the workflow {workflow.Name}  has failed with the rule { JsonSerializer.Serialize( paymentWorflowRulesResult?.FirstChallengedRule, new JsonSerializerOptions { WriteIndented=true}) } ");
+  else
+      logger.LogTrace($" the workflow {workflow.Name} run successfully");
+
+  //if there is one challenge at least : activity result is false, we ll return scaRequired=true with activityId value
+  //Else activity result is true , we ll return scaRequired=false with activityId=null
+  await domainActivityRepository.SetActivityResultAsync(paymentRequestActivity.ActivityId, !isChallenged,cancellationToken);
+
+  return Result.Ok(paymentWorflowRulesResult)!;
