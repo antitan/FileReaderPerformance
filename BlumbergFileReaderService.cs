@@ -1,3 +1,5 @@
+bONJOUR DANS MON PROJET C#, j'utilise les regles de workfolw suivante : 
+
 Voici le fonctionnement détaillée :
 Lorsqu’une nouvelle requête web est envoyée au travers de la méthode Payment :
 1)	On insert cette nouvelle requete en base. (table Activity + PaymentActivity) . Activity=null et ChallengeResult=null
