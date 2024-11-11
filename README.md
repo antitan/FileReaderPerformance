@@ -1,36 +1,11 @@
- public static void ZipFile(string inputFilePath, string outputTextFilePath)
- {
-     // Lire le fichier d'entrée et obtenir ses octets
-     byte[] fileBytes = File.ReadAllBytes(inputFilePath);
-
-     // Compresser les octets en utilisant GZipStream
-     using (var compressedStream = new MemoryStream())
-     {
-         using (var gzipStream = new GZipStream(compressedStream, CompressionLevel.Optimal, leaveOpen: true))
-         {
-             gzipStream.Write(fileBytes, 0, fileBytes.Length);
-         }
-         // Convertir les octets compressés en chaîne base64
-         string compressedBase64 = Convert.ToBase64String(compressedStream.ToArray());
-
-         // Écrire la chaîne compressée dans le fichier texte spécifié
-         File.WriteAllText(outputTextFilePath, compressedBase64);
-     }
- }
-
- public static void UnzipFile(string compressedTextFilePath, string outputFilePath)
- {
-     // Lire la chaîne compressée depuis le fichier texte
-     string compressedBase64 = File.ReadAllText(compressedTextFilePath);
-
-     // Convertir la chaîne base64 en octets compressés
-     byte[] compressedBytes = Convert.FromBase64String(compressedBase64);
-
-     // Décompresser les octets en utilisant GZipStream
-     using (var compressedStream = new MemoryStream(compressedBytes))
-     using (var gzipStream = new GZipStream(compressedStream, CompressionMode.Decompress))
-     using (var outputFileStream = new FileStream(outputFilePath, FileMode.Create))
-     {
-         gzipStream.CopyTo(outputFileStream);
-     }
- }
+Voici le fonctionnement détaillée :
+Lorsqu’une nouvelle requête web est envoyée au travers de la méthode Payment :
+1)	On insert cette nouvelle requete en base. (table Activity + PaymentActivity) . Activity=null et ChallengeResult=null
+2)	les règles sont remontées de la base de données de la table Rule ordonnées par ExecuteOrder croissant et le moteur de worflow exécute toutes les règles dans l’ordre. 
+3)	On itère sur les résultats d’exécution de chaque règle :
+-	Si le résultat de l’exécution de la règle courante est IsSuccess=true :
+-Si le résultat attendu de la règle est de type challenge  -> alors il y a challenge on insert un enregistrement dans ActivityWorkflow avec la valeur 0 puisque la règle n’est pas passée.
+-Sinon si le resultat est de type Allow  on insert un enregistrement dans ActivityWorkflow avec la valeur 1 puisque la règle est pas passée.
+              -     Sinon Si le résultat de l’exécution de la règle courante est IsSuccess=false :
+	    - Si le résultat attendu de la règle est de type challenge  -> alors il y a challenge on insert un enregistrement dans ActivityWorkflow avec la valeur 0 puisque la règle n’est pas passée.
+	    - Sinon si le résultat est de type Allow on insert on insert un enregistrement dans ActivityWorkflow avec la valeur 0 puisque la règle est passée.
