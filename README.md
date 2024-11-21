@@ -1,25 +1,30 @@
-j'ai une methode web api qui fait 2 controles avant de faire le traitement:
+de la meme facon, peux tu m'ecire la classe AIProcessedDocumentsListByIdsActionFilter qui implemente IActionFilter pour la méthode suivante :
 
-[HttpPost("AIProcessedDocuments")]
-[ProducesResponseType(typeof(DocumentListProcessedResponseDto), (int)HttpStatusCode.OK)]
+[HttpGet("AIProcessedDocuments/ListByIds")]
+[ProducesResponseType(typeof(IEnumerable<GetDocumentByIdsQueryResponseDto>), (int)HttpStatusCode.OK)]
 [ProducesResponseType((int)HttpStatusCode.NotFound)]
-[ProducesResponseType(typeof(DocumentListProcessedResponseDto), (int)HttpStatusCode.UnprocessableEntity)]
-[ProducesResponseType(typeof(DocumentListProcessedResponseDto), (int)HttpStatusCode.BadRequest)]
-[ProducesResponseType(typeof(DocumentListProcessedResponseDto), (int)HttpStatusCode.InternalServerError)]
-public async Task<IActionResult> ProcessDocuments([FromBody] IEnumerable<NewDocumentRequestDto> documentRequestListDto)
+[ProducesResponseType((int)HttpStatusCode.BadRequest)]
+[ProducesResponseType((int)HttpStatusCode.UnprocessableEntity)]
+[ProducesResponseType((int)HttpStatusCode.InternalServerError)]
+public async Task<IActionResult> AIProcessedDocumentsListByIds( [FromBody] RequestIdsDto dto)
 {
-        if (documentRequestListDto == null || !documentRequestListDto.Any())
-        {
-            return StatusCode((int)HttpStatusCode.NotFound, "PayLoad needs to contain one document item at least");
-        }
+    List<GetDocumentByIdsQueryResponseDto> results = new List<GetDocumentByIdsQueryResponseDto>(); 
+    if(dto.Ids == null || !dto.Ids.Any())
+    {
+        return StatusCode((int)HttpStatusCode.NotFound, "PayLoad needs to contain one Id at least");
+    }
 
-        int nbItemsToIngest = documentRequestListDto.Count();
-        if (nbItemsToIngest > applicationConfiguration.MaxDocumentsToIngestOneShot)
-        {
-            return StatusCode((int)HttpStatusCode.UnprocessableEntity, $"You can process {applicationConfiguration.MaxDocumentsToIngestOneShot} documents maximum  ");
-        }
-		//traitement...
+    int nbItemsToGetOneShot = dto.Ids.Count();
+    if (nbItemsToGetOneShot > applicationConfiguration.MaxDocumentsToGetOnShot)
+    {
+        return StatusCode((int)HttpStatusCode.UnprocessableEntity, $"You can retrieve {applicationConfiguration.MaxDocumentsToGetOnShot} document rows maximum.  ");
+    }
+    //traitement...
 }
-
-j'aimerai "deplacer" ces 2 controles dans une classe AIProcessedDocumentsActionFilter qui hérite de IActionFilter.
-Est-ce possible, peux tu écrire AIProcessedDocumentsActionFilter ?
+ avec 
+ 
+  public class RequestIdsDto
+ {
+     public List<Guid> Ids { get; set; } 
+ }
+  
