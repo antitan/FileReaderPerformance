@@ -1,15 +1,24 @@
- public class ClassMatcherContentPartDataModelFactory : IClassMatcherContentPartDataModelFactory
+ public interface IClassMatcherContentPartDataModel<T> where T : IContentPartDataModel
+ {
+      bool CheckMatchedClass(JObject jo);
+ }
+ 
+  public interface IClassMatcherContentPartDataModelService
+ {
+     IEnumerable<Type>? GetMatchedClasses(JObject jo);
+ }
+
+ public class ClassMatcherContentPartDataModelService : IClassMatcherContentPartDataModelService
  {
      private ConcurrentDictionary<Type, object> dicInstanceObject = new ConcurrentDictionary<Type, object>();
      private ConcurrentDictionary<Type, int> dicNbPropertiesByType = new ConcurrentDictionary<Type, int>();
-     public ClassMatcherContentPartDataModelFactory()
+     public ClassMatcherContentPartDataModelService()
      {
-         InitializeCache();
+         InitializeDictionnaries();
      }
 
-     private void InitializeCache()
+     private void InitializeDictionnaries()
      {
-         //find all classes who implement IClassMatcher 
          Assembly assembly = Assembly.GetExecutingAssembly();
          var typesWithMatchingInterface = assembly.GetTypes()
              .Where(type => type.IsClass && !type.IsAbstract)
@@ -17,17 +26,41 @@
                  i.IsGenericType &&
                  i.GetGenericTypeDefinition() == typeof(IClassMatcherContentPartDataModel<>) &&
                  typeof(IContentPartDataModel).IsAssignableFrom(i.GenericTypeArguments[0])
-             ));
-
-         //and cache them
-         if (typesWithMatchingInterface != null && typesWithMatchingInterface.Any())
+             )).ToList();  
+          
+         Parallel.ForEach(typesWithMatchingInterface, type =>
          {
-             foreach (var type in typesWithMatchingInterface)
-             {
-                 dicInstanceObject[type] = Activator.CreateInstance(type)!;
-                 PropertyInfo[] properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-                 dicNbPropertiesByType[type] = (properties != null && properties.Any()) ? properties.Length : 0;
-             }
-         }
+             dicInstanceObject[type] = Activator.CreateInstance(type)!;
+             PropertyInfo[] properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+             dicNbPropertiesByType[type] = (properties != null && properties.Any()) ? properties.Length : 0;
+         });
      }
+
+
+     public IEnumerable<Type>? GetMatchedClasses(JObject jo)
+     {
+         var results = new ConcurrentBag<(Type type,int nbProperties)>();
+         Parallel.ForEach(dicInstanceObject, kvp =>
+         {
+             if (kvp.Key.GetInterfaces().Any(i =>
+                 i.IsGenericType &&
+                 i.GetGenericTypeDefinition() == typeof(IClassMatcherContentPartDataModel<>) &&
+                 i.GenericTypeArguments[0] == typeof(T)))
+             {
+                 var instance = (IClassMatcherContentPartDataModel<T>)kvp.Value;
+                 var result = instance.CheckMatchedClass(jo);
+                 if (result)
+                 {
+                     int nbProperties = dicNbPropertiesByType[kvp.Key];
+                     var newItem = (instance.GetType(), nbProperties);
+                     results.Add(newItem);
+                 }
+             }
+         });
+
+         return results?
+                .OrderByDescending(o=>o.nbProperties)?
+                .Select(t=>t.type);
+     }
+
  }
